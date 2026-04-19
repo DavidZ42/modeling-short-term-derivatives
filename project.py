@@ -4,72 +4,106 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from scipy.stats import norm
 from matplotlib.lines import Line2D
+from datetime import date, timedelta
+from pathlib import Path
 
-# --- 1. Simulation Parameters ---
-# Since the CSV data was removed, we define the start, expiry, and initial price manually.
-start_time = pd.Timestamp('2026-04-19 12:00:00') 
-expiry_time = start_time + pd.Timedelta(hours=24)
-P0 = 0.50  # Starting probability/price
-
-# --- 2. Simulation Setup ---
-# Total time from start to expiry in seconds and years
-T_total_seconds = (expiry_time - start_time).total_seconds()
+# --- 1. Model Parameters ---
+sigma = 0.50  # Assumed annualized volatility of BTC (50%)
 SECONDS_IN_YEAR = 365 * 24 * 3600
-T = T_total_seconds / SECONDS_IN_YEAR
 
-# Align simulation steps to the total minutes in the timeframe
-N_steps = int(T_total_seconds / 60)
-M_paths = 10 
-dt = T / N_steps
+# Define the date range matching your downloaded files
+start_date = date(2026, 3, 14)
+end_date = date(2026, 3, 27)
 
-# Create a time grid for the simulation (in seconds), map to datetimes for plotting
-time_grid_seconds = np.linspace(0, T_total_seconds, N_steps + 1)
-sim_times = start_time + pd.to_timedelta(time_grid_seconds, unit='s')
+# --- 2. Visualization Setup ---
+plt.figure(figsize=(10, 6)) # Slightly wider format fits 24h overlays well
 
-paths = np.zeros((N_steps + 1, M_paths))
-paths[0] = P0
-eps = 1e-6 
+# --- 3. Process Data and Calculate P(S,t) ---
+current_date = start_date
+files_processed = 0
 
-# --- 3. Euler-Maruyama Simulation ---
-for i in range(N_steps):
-    t_year = time_grid_seconds[i] / SECONDS_IN_YEAR
-    tau = T - t_year
+# Base directory where the CSVs are located
+base_dir = Path('./') 
+
+# Define a fixed dummy start date to align all paths on the same 24-hour X-axis
+dummy_start_time = pd.Timestamp('2026-03-14 12:00:00')
+
+while current_date < end_date:
+    next_date = current_date + timedelta(days=1)
+    file_name = f"data/BTCUSDT_Prices_{current_date}_to_{next_date}.csv"
+    file_path = base_dir / file_name
     
-    if tau <= 0:
-        tau = 1e-10
+    try:
+        # Load the real BTC price data
+        df = pd.read_csv(file_path)
+        files_processed += 1
+    except FileNotFoundError:
+        # Skip if the file for this day doesn't exist
+        current_date = next_date
+        print("skipped!")
+        continue
         
-    P_current = paths[i]
-    P_clipped = np.clip(P_current, eps, 1 - eps)
+    # Convert time to datetime objects
+    df['Time (ET)'] = pd.to_datetime(df['Time (ET)'])
     
-    volatility = norm.pdf(norm.ppf(P_clipped)) / np.sqrt(tau)
-    dW = np.random.normal(0, np.sqrt(dt), M_paths)
+    # Identify the exact 12:00 PM start time for this specific day's contract
+    actual_start_time = df['Time (ET)'].iloc[0].replace(hour=12, minute=0, second=0, microsecond=0)
     
-    P_next = P_current + volatility * dW
-    paths[i+1] = np.clip(P_next, 0, 1)
+    # Normalize the time so every file starts at dummy_start_time and spans 24H
+    normalized_time = dummy_start_time + (df['Time (ET)'] - actual_start_time)
+    
+    # S0 is the starting price at 12:00 PM for this specific 24H contract
+    S0 = df['Price'].iloc[0]
+    
+    # Expiry time is exactly 24 hours after the intended 12:00 PM start
+    expiry_time = actual_start_time + timedelta(days=1)
+    
+    # Calculate tau (time to expiry in years)
+    time_to_expiry_sec = (expiry_time - df['Time (ET)']).dt.total_seconds()
+    
+    # Clip tau to prevent division by zero at the exact moment of expiry
+    time_to_expiry_sec = np.clip(time_to_expiry_sec, 1e-6, None) 
+    tau = time_to_expiry_sec / SECONDS_IN_YEAR
+    
+    # Extract S_t
+    S_t = df['Price']
+    
+    # Calculate d based on your derived equation
+    d = (np.log(S_t / S0) - 0.5 * (sigma**2) * tau) / (sigma * np.sqrt(tau))
+    
+    # Calculate derivative price P (Probability)
+    P = norm.cdf(d)
+    
+    # Plot this day's theoretical derivative price path on the shared axis
+    plt.plot(normalized_time, P, color='steelblue', alpha=0.4, linewidth=1.5)
+    
+    current_date = next_date
 
-# --- 4. Visualization ---
-plt.figure(figsize=(14, 7))
+if files_processed == 0:
+    print("Warning: No CSV files found. Check your file paths and names.")
 
-# Plot simulated paths 
-plt.plot(sim_times, paths, color='steelblue', alpha=0.7, linewidth=1)
-
-# Formatting
-plt.title('24H EOD BTC Contract: SDE Simulations', fontsize=14)
-plt.xlabel('Time (ET)', fontsize=12)
-plt.ylabel('Contract Price (Probability)', fontsize=12)
+# --- 4. Formatting ---
+plt.title(f'24H EOD BTC Contracts: Overlay of Daily Paths ($\sigma$={sigma})', fontsize=14)
+plt.xlabel('Time of Day (ET)', fontsize=12)
+plt.ylabel('Contract Price (Probability P)', fontsize=12)
 plt.ylim(-0.05, 1.05)
 plt.axhline(1.0, color='black', linestyle='--', alpha=0.3)
+plt.axhline(0.5, color='gray', linestyle=':', alpha=0.5) 
 plt.axhline(0.0, color='black', linestyle='--', alpha=0.3)
 
-# Format the X-axis to clearly show the day transition
-plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
-plt.xticks(rotation=45)
+# Format the X-axis to just show the hour/minute of the day (e.g., 12:00 PM)
+plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%I:%M %p'))
+
+# Ensure ticks cover the 24 hour range properly (every 3 hours)
+tick_locations = [dummy_start_time + timedelta(hours=3*i) for i in range(9)]
+plt.xticks(tick_locations, rotation=45)
+
 plt.grid(True, alpha=0.3)
 
 # Add a custom legend
-sim_line = Line2D([0], [0], color='steelblue', alpha=0.8, label='Simulated Paths (SDE)')
-plt.legend(handles=[sim_line], loc='upper left')
+data_line = Line2D([0], [0], color='steelblue', alpha=0.6, linewidth=1.5, label='Theoretical Derivative Price')
+plt.legend(handles=[data_line], loc='upper left')
 
 plt.tight_layout()
-plt.savefig("multi_day_simulated.png")
+plt.savefig("multi_day_overlay_implied_price.png")
 plt.show()
