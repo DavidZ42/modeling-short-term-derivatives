@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 
 # --- 1. Model Parameters ---
-sigma = 0.50  # Assumed annualized volatility of BTC (50%)
+sigma = 0.44  # Assumed annualized volatility of BTC (50%)
 SECONDS_IN_YEAR = 365 * 24 * 3600
 
 # THE FIX: Manually input the official Polymarket strike price for days that resolve incorrectly.
