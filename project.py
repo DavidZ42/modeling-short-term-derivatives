@@ -1,68 +1,88 @@
+import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 from scipy.stats import norm
+from matplotlib.lines import Line2D
 
-# --- 1. Simulation Parameters ---
-P0 = 0.50               # Initial contract price (Start of day, At-the-money)
-hours_to_expiry = 24     # Time to resolution in hours
-T = hours_to_expiry / (24 * 365) # Convert to years (standard for SDEs)
+# --- 1. Real Data Setup ---
+# Load the actual data from your CSV
+df = pd.read_csv("./polymarket_btc_up_prices.csv")
 
-N_steps = 500           # Number of discrete time steps
-M_paths = 5            # Number of paths to simulate
+# Parse the 'Time (ET)' column into proper datetime objects
+# We prepend '2026-' to match your target year
+df['Time'] = pd.to_datetime('2026-' + df['Time (ET)'])
 
+# Set expiry to the exact final minute in the dataset
+expiry_time = df['Time'].iloc[-1]
+
+# SDE parameters derived directly from the real data's starting point
+start_time = df['Time'].iloc[0]
+P0 = df['Price'].iloc[0]
+
+# --- 2. Simulation Setup ---
+# Total time from start to expiry in seconds and years
+T_total_seconds = (expiry_time - start_time).total_seconds()
+SECONDS_IN_YEAR = 365 * 24 * 3600
+T = T_total_seconds / SECONDS_IN_YEAR
+
+# Align simulation steps to the total minutes in the timeframe
+N_steps = int(T_total_seconds / 60)
+M_paths = 10 
 dt = T / N_steps
-time_grid = np.linspace(0, T, N_steps + 1)
 
-# Initialize an array to hold all simulated paths
-# Rows = time steps, Columns = individual paths
+# Create a time grid for the simulation (in seconds), map to datetimes for plotting
+time_grid_seconds = np.linspace(0, T_total_seconds, N_steps + 1)
+sim_times = start_time + pd.to_timedelta(time_grid_seconds, unit='s')
+
 paths = np.zeros((N_steps + 1, M_paths))
 paths[0] = P0
-
-# Epsilon to prevent norm.ppf(0) or norm.ppf(1) from returning -inf / +inf
 eps = 1e-6 
 
-# --- 2. Euler-Maruyama Simulation ---
+# --- 3. Euler-Maruyama Simulation ---
 for i in range(N_steps):
-    t = time_grid[i]
-    tau = T - t
+    t_year = time_grid_seconds[i] / SECONDS_IN_YEAR
+    tau = T - t_year
     
-    # Prevent division by zero at the exact moment of expiry
     if tau <= 0:
         tau = 1e-10
         
     P_current = paths[i]
-    
-    # Clip prices to avoid math domain errors in the inverse CDF
     P_clipped = np.clip(P_current, eps, 1 - eps)
     
-    # Calculate the instantaneous volatility from the SDE: phi(N^-1(P)) / sqrt(tau)
     volatility = norm.pdf(norm.ppf(P_clipped)) / np.sqrt(tau)
-    
-    # Generate random Brownian increments (dW)
     dW = np.random.normal(0, np.sqrt(dt), M_paths)
     
-    # Calculate the next step
     P_next = P_current + volatility * dW
-    
-    # Enforce the strict [0, 1] bounds of the binary contract
     paths[i+1] = np.clip(P_next, 0, 1)
 
-# --- 3. Visualization ---
-# Convert the time grid back to minutes for a readable X-axis
-time_grid_minutes = time_grid * (24 * 365 * 60)
+# --- 4. Visualization ---
+plt.figure(figsize=(14, 7))
 
-plt.figure(figsize=(12, 7))
+# Plot simulated paths 
+plt.plot(sim_times, paths, color='steelblue', alpha=0.5, linewidth=1)
 
-# Plot all paths
-plt.plot(time_grid_minutes, paths, alpha=0.6, linewidth=1.5)
+# Plot actual empirical data on top
+plt.plot(df['Time'], df['Price'], color='black', linewidth=2.0, label='Actual Historical Path')
 
 # Formatting
-plt.title(f'Simulated EOD BTC Up/Down Contract Paths\n({M_paths} Paths, {hours_to_expiry} Hours to Expiry, Initial Price = {P0})', fontsize=14)
-plt.xlabel('Minutes Elapsed', fontsize=12)
+plt.title('24H EOD BTC Contract: SDE Simulations vs. Actual Data', fontsize=14)
+plt.xlabel('Time (ET)', fontsize=12)
 plt.ylabel('Contract Price (Probability)', fontsize=12)
 plt.ylim(-0.05, 1.05)
-plt.axhline(1.0, color='black', linestyle='--', alpha=0.5)
-plt.axhline(0.0, color='black', linestyle='--', alpha=0.5)
+plt.axhline(1.0, color='black', linestyle='--', alpha=0.3)
+plt.axhline(0.0, color='black', linestyle='--', alpha=0.3)
+
+# Format the X-axis to clearly show the day transition
+plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
+plt.xticks(rotation=45)
 plt.grid(True, alpha=0.3)
 
+# Add a custom legend
+handles, labels = plt.gca().get_legend_handles_labels()
+sim_line = Line2D([0], [0], color='steelblue', alpha=0.8, label='Simulated Paths (SDE)')
+handles.append(sim_line)
+plt.legend(handles=handles, loc='upper left')
+
+plt.tight_layout()
 plt.show()
