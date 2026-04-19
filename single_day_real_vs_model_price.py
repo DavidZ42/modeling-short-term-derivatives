@@ -16,7 +16,7 @@ SECONDS_IN_YEAR = 365 * 24 * 3600
 strike_price_override = None 
 
 # Target a specific day for the plot
-target_date = date(2026, 3, 17)
+target_date = date(2026, 3, 24)
 next_date = target_date + timedelta(days=1)
 day_str = target_date.strftime('%d') # Extracts '15'
 next_day_str = next_date.strftime('%d')
