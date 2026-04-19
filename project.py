@@ -1,24 +1,15 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from scipy.stats import norm
 from matplotlib.lines import Line2D
 
-# --- 1. Real Data Setup ---
-# Load the actual data from your CSV
-df = pd.read_csv("./polymarket_btc_up_prices.csv")
-
-# Parse the 'Time (ET)' column into proper datetime objects
-# We prepend '2026-' to match your target year
-df['Time'] = pd.to_datetime('2026-' + df['Time (ET)'])
-
-# Set expiry to the exact final minute in the dataset
-expiry_time = df['Time'].iloc[-1]
-
-# SDE parameters derived directly from the real data's starting point
-start_time = df['Time'].iloc[0]
-P0 = df['Price'].iloc[0]
+# --- 1. Simulation Parameters ---
+# Since the CSV data was removed, we define the start, expiry, and initial price manually.
+start_time = pd.Timestamp('2026-04-19 12:00:00') 
+expiry_time = start_time + pd.Timedelta(hours=24)
+P0 = 0.50  # Starting probability/price
 
 # --- 2. Simulation Setup ---
 # Total time from start to expiry in seconds and years
@@ -60,13 +51,10 @@ for i in range(N_steps):
 plt.figure(figsize=(14, 7))
 
 # Plot simulated paths 
-plt.plot(sim_times, paths, color='steelblue', alpha=0.5, linewidth=1)
-
-# Plot actual empirical data on top
-plt.plot(df['Time'], df['Price'], color='black', linewidth=2.0, label='Actual Historical Path')
+plt.plot(sim_times, paths, color='steelblue', alpha=0.7, linewidth=1)
 
 # Formatting
-plt.title('24H EOD BTC Contract: SDE Simulations vs. Actual Data', fontsize=14)
+plt.title('24H EOD BTC Contract: SDE Simulations', fontsize=14)
 plt.xlabel('Time (ET)', fontsize=12)
 plt.ylabel('Contract Price (Probability)', fontsize=12)
 plt.ylim(-0.05, 1.05)
@@ -79,10 +67,9 @@ plt.xticks(rotation=45)
 plt.grid(True, alpha=0.3)
 
 # Add a custom legend
-handles, labels = plt.gca().get_legend_handles_labels()
 sim_line = Line2D([0], [0], color='steelblue', alpha=0.8, label='Simulated Paths (SDE)')
-handles.append(sim_line)
-plt.legend(handles=handles, loc='upper left')
+plt.legend(handles=[sim_line], loc='upper left')
 
 plt.tight_layout()
+plt.savefig("multi_day_simulated.png")
 plt.show()
