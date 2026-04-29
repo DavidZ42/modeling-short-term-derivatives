@@ -4,14 +4,13 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
-
 import requests
 
 SYMBOL = "BTCUSDT"
 MARKET = "spot"
 INTERVAL = "1m"
 
-# Noon ET on this date -> noon ET next day
+# set this to whatever day is neededd
 TARGET_DATE = "2026-03-10"
 
 EASTERN = ZoneInfo("America/New_York")
@@ -59,7 +58,6 @@ def extract_csv_rows_from_zip(zip_bytes: bytes):
 
 def raw_ts_to_utc_dt(raw_ts: str) -> datetime:
     ts = int(raw_ts)
-    # Binance public archive can be in microseconds for newer spot data
     if ts > 10**15:
         return datetime.fromtimestamp(ts / 1_000_000, tz=timezone.utc)
     return datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
@@ -82,18 +80,18 @@ def normalize_row(row: list[str]) -> list[str]:
         row[0],
         open_dt_utc.isoformat(),
         open_dt_et.isoformat(),
-        row[1],   # open
-        row[2],   # high
-        row[3],   # low
-        row[4],   # close
-        row[5],   # volume
+        row[1],
+        row[2],
+        row[3],
+        row[4],
+        row[5],# volume
         row[6],
         close_dt_utc.isoformat(),
         close_dt_et.isoformat(),
-        row[7],   # quote asset volume
-        row[8],   # number of trades
-        row[9],   # taker buy base asset volume
-        row[10],  # taker buy quote asset volume
+        row[7],
+        row[8],
+        row[9],
+        row[10],
         row[11] if len(row) > 11 else "",
     ]
 
@@ -121,9 +119,7 @@ def main():
         / f"{SYMBOL}_{INTERVAL}_{window_start_et.strftime('%Y-%m-%d_%I%M%p_ET')}_to_{window_end_et.strftime('%Y-%m-%d_%I%M%p_ET')}.csv"
     )
 
-    print("ET window: ", window_start_et.isoformat(), "to", window_end_et.isoformat())
-    print("UTC window:", window_start_utc.isoformat(), "to", window_end_utc.isoformat())
-    print("UTC days to fetch:", [d.strftime("%Y-%m-%d") for d in days_to_fetch])
+    print("utc window:", window_start_utc.isoformat(), "to", window_end_utc.isoformat())
 
     total_rows = 0
     missing_days = []
@@ -151,11 +147,9 @@ def main():
 
         for day in days_to_fetch:
             url = kline_zip_url(SYMBOL, day)
-            print(f"Downloading {url}")
 
             zip_bytes = download_zip_bytes(url)
             if zip_bytes is None:
-                print(f"  Missing archive for {day.date()}")
                 missing_days.append(day.strftime("%Y-%m-%d"))
                 continue
 
@@ -168,15 +162,7 @@ def main():
                     kept += 1
 
             total_rows += kept
-            print(f"  Wrote {kept} rows from {day.date()}")
-
-    print(f"\nDone. Wrote {total_rows} rows to:")
     print(output_file)
-
-    if missing_days:
-        print("\nMissing archive days:")
-        for d in missing_days:
-            print(" ", d)
 
 
 if __name__ == "__main__":

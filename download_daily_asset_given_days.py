@@ -10,7 +10,7 @@ SYMBOL = "BTCUSDT"
 MARKET = "spot"
 INTERVAL = "1m"
 
-# Noon ET start and end dates for the overall pull
+#noon start and end dates
 START_DATE = "2026-03-14"
 END_DATE = "2026-03-27"
 
@@ -59,18 +59,12 @@ def extract_csv_rows_from_zip(zip_bytes: bytes):
 
 def raw_ts_to_utc_dt(raw_ts: str) -> datetime:
     ts = int(raw_ts)
-    # Binance public archive can be in microseconds for newer spot data
     if ts > 10**15:
         return datetime.fromtimestamp(ts / 1_000_000, tz=timezone.utc)
     return datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
 
 
 def get_window_start_date(dt_et: datetime):
-    """
-    Determines which 12PM-12PM 'bucket' a timestamp belongs to.
-    If it's 12 PM or later, it belongs to the current calendar day's bucket.
-    If it's before 12 PM, it belongs to the previous calendar day's bucket.
-    """
     if dt_et.hour >= 12:
         return dt_et.date()
     else:
@@ -84,7 +78,7 @@ def main():
     window_start_utc = window_start_et.astimezone(timezone.utc)
     window_end_utc = window_end_et.astimezone(timezone.utc)
 
-    # Determine all UTC days needed to cover the ET time window
+    # get all the utc days to cover et time window
     current_day_utc = datetime(
         window_start_utc.year, window_start_utc.month, window_start_utc.day, tzinfo=timezone.utc
     )
@@ -97,14 +91,11 @@ def main():
         days_to_fetch.append(current_day_utc)
         current_day_utc += timedelta(days=1)
 
-    print("Overall ET window: ", window_start_et.isoformat(), "to", window_end_et.isoformat())
-    print(f"Fetching {len(days_to_fetch)} UTC days...")
+    print(f"getting {len(days_to_fetch)} utc days")
 
     total_rows = 0
     missing_days = []
     generated_files = []
-
-    # File state variables for chunking
     current_window_start = None
     current_file = None
     current_writer = None
@@ -113,11 +104,9 @@ def main():
 
     for day in days_to_fetch:
         url = kline_zip_url(SYMBOL, day)
-        print(f"\nDownloading {url}")
 
         zip_bytes = download_zip_bytes(url)
         if zip_bytes is None:
-            print(f"  Missing archive for {day.date()}")
             missing_days.append(day.strftime("%Y-%m-%d"))
             continue
 
@@ -128,13 +117,11 @@ def main():
             open_dt_utc = raw_ts_to_utc_dt(row[0])
             open_dt_et = open_dt_utc.astimezone(EASTERN)
             
-            # Filter rows to only keep those within our overall range
-            # Using `< window_end_et` so we capture up to 11:59:00 AM of the final day
-            # to prevent overlapping 12:00:00 rows.
+            # filter rows
             if window_start_et <= open_dt_et < window_end_et:
                 win_start_date = get_window_start_date(open_dt_et)
                 
-                # If the timestamp has crossed noon into a new window bucket, swap files
+                #swap files if crossed
                 if win_start_date != current_window_start:
                     if current_file is not None:
                         current_file.close()
@@ -150,28 +137,19 @@ def main():
                     current_writer.writerow(["Time (ET)", "Price"])
                     
                     generated_files.append(file_name)
-                    print(f"  -> Started new file: {file_name}")
+                    print("new file started")
 
                 time_str = open_dt_et.strftime("%Y-%m-%d %H:%M:%S")
-                price = row[4] # row[4] is the closing price for the 1m candle
+                price = row[4]
                 current_writer.writerow([time_str, price])
                 kept += 1
 
         total_rows += kept
-        print(f"  Wrote {kept} rows from {day.date()}")
 
-    # Ensure the last file is closed properly
     if current_file is not None:
         current_file.close()
 
-    print(f"\nDone. Wrote {total_rows} total rows across {len(generated_files)} files:")
-    for f in generated_files:
-        print(f" - {f}")
-
-    if missing_days:
-        print("\nMissing archive days:")
-        for d in missing_days:
-            print(" ", d)
+    print("done")
 
 if __name__ == "__main__":
     main()
